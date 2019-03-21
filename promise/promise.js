@@ -1,96 +1,237 @@
-// 事件类 
-function Thing(){
-    let callbacks = {}; // 
-    thing.prototype.on = function(name , callback){
-        if(callbacks[name]){
-            callbacks[name].push(callback);
+/**
+ * q1:同步代码,error在promise的resolve之后,不处理.
+ * q2:异步代码,catch不到
+ * catch捕获是以流的形式传递
+ * resolve 后面throw代码不影响
+ */
+function PP(){ 
+    let promises = new Map();
+    let index = 123;
+    //沿着链表装载
+    function loadLineToList(obj){
+        //这一串的状态是相同的了 
+        let previous = null;
+        let end = obj;
+        let temp_end = obj;
+        while(previous=temp_end.previous){ 
+            previous.state = end.state;
+            previous.value = end.value;        
+            //把上一个promise下面的节点移到end下面
+            if(promises.get(end._index)){
+                if(promises.get(previous._index)){
+                    // 合并后的节点数组
+                    let newPromiseItem = promises.get(end._index).concat(promises.get(previous._index));
+                    promises.set(end._index,newPromiseItem);
+                }    
+            }else{
+                //不存在,自己下面没有节点 
+                if(promises.get(previous._index)){
+                    // 合并后的节点数组
+                    promises.set(end._index,promises.get(previous._index));
+                }
+
+            }
+            temp_end = temp_end.previous;
+        }
+    }
+    app.prototype.resolve = function(data){
+        //promise的状态一旦改变就无法变更,如果执行过resolve,再执行的resolve,reject都不作数
+        if(this._statusChange){
             return;
         }
-        callbacks[name] = [];
-        callbacks[name].push(callback);
+        if(!this._statusChange){
+            this._statusChange = true;
+        }
+        let ans = null;
+        let promise = null;
+        let item;
+        // 执行mic任务队列里面的任务 , 这里用setTimeout(fn,0)代替
+        setTimeout(()=>{
+            if(typeof data == 'object' && data!==null &&  data.__proto__.constructor == app){
+                // 所以说你这里面还是属于配置层!!
+                data.previous = this;
+            }else{      
+                // 真正执行
+                setTimeout(()=>{
+                    this.state = "resolve";
+                    this.value = data;
+                    loadLineToList(this);
+                    if(item=promises.get(this._index)){
+                        // 拿出当前promise调用的所有then方法的回调函数,并执行
+                        for(let i=0;i<item.length;i++){
+                            // then 
+                            if(item[i].type == 'then'){
+                                try{
+                                    // run first resolve
+                                    ans = item[i].callback[0].fn(data);
+                                }catch(err){
+                                    promise = promises.get(this._index)[i].instance;
+                                    promise.reject(err);
+                                    return;
+                                }  
+                            }else{
+                                //有这个promise的catch方法,方法不执行
+                                ans = data;
+                            }
+                            promise = promises.get(this._index)[i].instance;
+                            // 如果返回了一个promise
+                            if(typeof ans == 'object' && ans!==null &&  ans.__proto__.constructor == app){
+                                promise.next = ans;
+                                ans.previous = promise;
+                            }else{
+                                if(promise){
+                                    promise.resolve(ans);
+                                }
+                            }
+                        }
+                        // 
+                    }else{
+                        return;
+                    }
+                },0)
+                
+            }
+
+        },0)
     }
-    thing.prototype.emit = function(name , data){
-        // 
-        setTimeout(function(){
-            if(!callbacks[name]){
-                console.log("没有绑定事件～～");
+    app.prototype.reject = function(error){   
+        ////promise的状态一旦改变就无法变更,如果执行过resolve,再执行的resolve,reject都不作数
+        if(this._statusChange){
+            return;
+        }
+        if(!this._statusChange){
+            this._statusChange = true;
+        }
+        //向下找promise,直到找到一个catch,至于不是catch的,状态一律变成reject
+        let promise,fn;
+        setTimeout(()=>{
+            this.state = "reject";
+            this.value = error;
+            loadLineToList(this);
+            let list = promises.get(this._index); // 
+            if(!list || list.length==0){
+                throw new Error("(in promise) "+error);
                 return;
             }
-            for(var i=0; i<callbacks[name].length;i++){
-                callbacks[name][i](data);
-            }
-        },0)
-        
-    }
-    function thing(){
-        
-    }
-    return thing; // 返回一个事件类
-} 
-//
-function CC(){
-    const TCC = Thing(); 
-    const thing = new TCC();
-    // 暂时处理不同得promise 实例 ， 该有自己的事件类实例 
-    let sid = 0;
-    // resolve 
-    promise.prototype.resolve = function(data){
-        // notify ---> 去通知.then()函数里 thing.on() 那注册的那个方法 , 你可以执行了。。
-        this.state = "resolve";
-        thing.emit('resolve'+this.sid,data);
-    }
-    // reject
-    promise.prototype.reject = function(data){
-        // notify ---> 去通知.then()函数里 thing.on() 那注册的那个方法 , 你可以执行了。。
-        this.state = "reject";
-        thing.emit('reject'+this.sid ,data);
-    }
-    // then 
-    promise.prototype.then = function(){
-        if(arguments.length > 1){
-            thing.on('reject'+this.sid , arguments[1]);
-        }
-        if(arguments.length > 0){
-            thing.on('resolve'+this.sid , arguments[0]);
-        }
-        return this;
-    }
-    promise.prototype.catch = function(){
-        thing.on('reject'+this.sid , arguments[0]);
-        return this;
-    }
-    function promise(callback){
-        this.state = "pendding";
-        this.sid = ++sid;
-        if(callback){
-            callback(this.resolve.bind(this) , this.reject.bind(this));  // 绑定this.... , 有时间可以手写个bind, 真心好用的方法
-        }
-        
-    }
-    promise.all = function(...argu){   // 静态方法 
-        // 不同的事件类实例
-        let pp = new promise(); // 作为返回结果的 
-        // 这些promise 实例都是emit 'resolve' 或者 'reject'
-        // 返回的也是一个promise 实例 , 但是什么时候emit呢 ?
-        let len = argu[0].length;
-        let data = []; // 一会要做参数返回的 
-        for(let i=0; i<len; i++){
-            // 异步代码啊 ..
-            argu[0][i].then(function(result){
-                data.push(result);
-                if(data.length == len){   // 全都是 resolve 
-                    // 触发 resolve 
-                    pp.resolve(data);
+            for(let i=0;i<list.length;i++){
+                promise = list[i].instance;
+                type = list[i].type;
+                if(type == 'then'){   // 这个promise 是通过p1.then() 出来的 ， 但是由于p1是reject , 所以当前promise转换成reject
+                    if(list[i].callback.length == 1){
+                        promise.value = error;
+                        promise.reject(error);
+                        continue;
+                    }else{
+                        fn = list[i].callback[1].fn;
+                    }
                 }
-            }).catch(function(error){
-                // 如果有一个reject , 直接break;  我这也就是遵从人家的规则 , 其实想咋写咋写 
-                pp.reject(error);
-                //break;
-            });
-        }
-        return pp;
+                // 拿到catch里面的fn
+                if(!fn){
+                    fn = list[i].callback[0].fn; 
+                }
+                let ans = null;
+                try{
+                    ans = fn(error);
+                }catch(err){
+                    promise.reject(err);
+                    return;
+                }
+                promise.value = ans;
+                if(typeof ans == 'object' && ans!==null &&  ans.__proto__.constructor == app){
+                    ans.previous = promise;
+                }else{
+                    if(promise){
+                        promise.resolve(ans);
+                    }
+                }
+            }
+        },5) 
+
     }
-    // 还有个 promise.rice 方法 , 和.all 差不多 , 懒得写了.
-    return promise;
+    // Promise 构造函数
+    function app(fn,son){
+        this.state = "pendding";
+        this._index = ++index;
+        this._statusChange = false;
+        try{
+            fn(this.resolve.bind(this),this.reject.bind(this));
+        }catch(err){
+            setTimeout(()=>{
+                // 执行完resolve或者reject
+                if(this._statusChange){
+                    return;
+                }
+                this.reject(err);
+            },0)
+        }
+        
+    }
+    //
+    app.prototype.then = function(resolveFn , rejectFn){
+        let length = arguments.length;
+        if(length > 0 && length < 3){
+            if(typeof resolveFn !== 'function'){
+                throw new Error('arguments error');
+            }
+            if(rejectFn && typeof rejectFn !== 'function'){
+                throw new Error('arguments error');
+            }
+        }else{
+            throw new Error('arguments error');
+            return;
+        }
+        // 把要发生的事件保存起来 , 并且返回一个新的promise 
+        let instance = new app(()=>{});
+        let item = {
+            type : 'then',
+            instance : instance,
+            callback : length > 1 ? ([{
+                status : 'resolve',
+                fn : resolveFn
+            },{
+                status : 'reject',
+                fn : rejectFn
+            }]) : ([{
+                status : 'resolve',
+                fn : resolveFn
+            }])
+        }
+        // 
+        let p_item;
+        if(p_item=promises.get(this._index)){
+            p_item.push(item);
+        }else{
+            promises.set(this._index,[item])
+        }
+        return instance;
+    }
+    app.prototype.catch = function(rejectFn){
+        if(typeof rejectFn !== 'function'){
+            throw new Error('arguments error');
+            return;
+        }
+        // 把要发生的事件,新的promise保存起来 , 并且返回新的promise 
+        let instance = new app(()=>{});
+        let item = {
+            type : 'catch',
+            instance : instance,
+            callback : ([{
+                status : 'reject',
+                fn : rejectFn
+            }])
+        }
+        let p_item;
+        if(p_item=promises.get(this._index)){
+            p_item.push(item);
+        }else{
+            promises.set(this._index,[item])
+        }
+        return instance;
+    }
+    return app;
 }
-var Pro = CC();  // ----> equal to Promise ...
+let Promise = PP();
+
+
+
+
